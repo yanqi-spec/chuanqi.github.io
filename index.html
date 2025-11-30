@@ -407,7 +407,11 @@
       flash: 0,
       shield: 0, // 护盾持续时间（帧）
       get atk() {
-        return this.level >= 99 ? 9999 : (this.level <= 3 ? 10 : this.level <= 6 ? 20 : 50 + (this.level - 6) * 5);
+        if (godMode) return 9999;
+        if (this.level <= 3) return 10;
+        if (this.level <= 6) return 20;
+        if (this.level <= 15) return 50 + (this.level - 6) * 5; // 15级时为95
+        return 95 + (this.level - 15) * 5; // 16级起每级+5
       },
       get expNeeded() {
         return 3;
@@ -599,8 +603,15 @@
     function levelUp() {
       player.level++;
       player.exp = 0;
-      player.maxHp += 50;
+      
+      // HP 成长：1~15级 +50，16+级 +10
+      if (player.level <= 15) {
+        player.maxHp += 50;
+      } else {
+        player.maxHp += 10;
+      }
       player.hp = player.maxHp;
+      
       updateUI();
       showMessage(`🎉 升级！Lv.${player.level}`, true);
       setTimeout(hideMessage, 1000);
