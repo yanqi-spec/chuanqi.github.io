@@ -164,6 +164,59 @@
       0% { transform: translateY(0); opacity: 1; }
       100% { transform: translateY(-40px); opacity: 0; }
     }
+
+    /* 暂停按钮 */
+    #pauseButton {
+      position: absolute;
+      bottom: 60px;
+      left: 12px;
+      background-color: rgba(50, 70, 90, 0.8);
+      color: white;
+      border: none;
+      padding: 10px;
+      font-size: 16px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 8px;
+      z-index: 12;
+    }
+
+    /* 游戏说明面板 - 可折叠 */
+    #gameInstructions {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background-color: rgba(50, 70, 90, 0.8);
+      color: white;
+      padding: 12px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      z-index: 10;
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 220px;
+    }
+
+    #instructionsHeader {
+      cursor: pointer;
+      font-weight: bold;
+      color: #64b5f6;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    #instructionsContent {
+      transition: opacity 0.3s, max-height 0.3s ease-out;
+      overflow: hidden;
+    }
+
+    #instructionsContent.collapsed {
+      opacity: 0;
+      max-height: 0 !important;
+      padding: 0 !important;
+    }
   </style>
 </head>
 <body>
@@ -172,7 +225,7 @@
     <canvas id="gameCanvas" width="640" height="480"></canvas>
     <div id="uiPanel">
       ❤️ <span id="hp">100</span> / <span id="maxHp">100</span> |
-      ⚔️ <span id="atk">10</span> |
+      ⚔️ <span id="atk">5</span> |
       📊 Lv.<span id="level">1</span> |
       EXP: <span id="exp">0</span>/<span id="expNeeded">3</span> |
       关卡: <span id="stage">1</span>
@@ -192,6 +245,25 @@
       </div>
     </div>
     <div id="message">勇者传说</div>
+
+    <!-- 暂停按钮 -->
+    <button id="pauseButton" onclick="togglePause()">|| 暂停</button>
+
+    <!-- 可折叠的游戏说明 -->
+    <div id="gameInstructions">
+      <div id="instructionsHeader" onclick="toggleInstructions()">
+        游戏说明
+        <span id="toggleIcon">▼</span>
+      </div>
+      <div id="instructionsContent">
+        <p>使用 WASD 或方向键移动。</p>
+        <p>空格键进行普通攻击。</p>
+        <p>Q：爆炸（范围伤害）</p>
+        <p>E：护盾（2秒无敌）</p>
+        <p>R：闪电（连锁打击最多5个敌人）</p>
+        <p>击败所有敌人即可进入下一关！</p>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -236,15 +308,15 @@
 
     // ===== 技能系统 =====
     const SKILLS = {
-      q: { name: '爆炸', cooldown: 480, current: 0, key: 'q' },   // 8秒 = 480帧
-      e: { name: '护盾', cooldown: 900, current: 0, key: 'e' },   // 15秒
-      r: { name: '闪电', cooldown: 720, current: 0, key: 'r' }    // 12秒
+      q: { name: '爆炸', cooldown: 480, current: 0, key: 'q' },
+      e: { name: '护盾', cooldown: 900, current: 0, key: 'e' },
+      r: { name: '闪电', cooldown: 720, current: 0, key: 'r' }
     };
 
     function useSkill(skillKey) {
       const skill = SKILLS[skillKey];
       if (skill.current > 0 && !godMode) return false;
-      if (gameOver || gameWon) return false;
+      if (gameOver || gameWon || paused) return false;
 
       skill.current = godMode ? 0 : skill.cooldown;
       updateSkillUI();
@@ -274,7 +346,7 @@
         const ex = e.x + e.size / 2;
         const ey = e.y + e.size / 2;
         const dist = Math.hypot(px - ex, py - ey);
-        if (dist < 120) { // 爆炸半径
+        if (dist < 120) {
           e.hp -= damage;
           e.hitFlash = 5;
           damageTexts.push({ x: ex, y: ey, text: damage.toString(), life: 60 });
@@ -288,14 +360,14 @@
     }
 
     function skillShield() {
-      player.shield = 120; // 2秒无敌
+      player.shield = 120;
       createSkillParticles(player.x + player.size/2, player.y + player.size/2, '#4fc3f7', 15);
     }
 
     function skillChainLightning() {
       if (enemies.length === 0) return;
       const targets = [];
-      let current = enemies[0]; // 从第一个开始
+      let current = enemies[0];
       const maxTargets = 5;
       const visited = new Set();
 
@@ -303,7 +375,6 @@
         if (visited.has(current)) break;
         targets.push(current);
         visited.add(current);
-        // 找最近的未访问敌人
         let next = null;
         let minDist = Infinity;
         for (const e of enemies) {
@@ -338,7 +409,6 @@
             if (!godMode && !e.isSummoned) gainExp(1);
           }
         }
-        // 闪电特效
         if (idx < targets.length - 1) {
           const fromX = targets[idx].x + targets[idx].size/2;
           const fromY = targets[idx].y + targets[idx].size/2;
@@ -385,6 +455,12 @@
     const CANVAS_HEIGHT = 480;
     const TOTAL_STAGES = 100;
 
+    // 新增：小兵颜色池
+    const ENEMY_COLORS = ['#f44336', '#2196f3', '#4caf50', '#ffeb3b', '#e91e63'];
+    
+    // 新增：小兵自动生成定时器
+    let spawnIntervalId = null;
+
     let enemies = [];
     let damageTexts = [];
     let particles = [];
@@ -393,6 +469,7 @@
     let gameWon = false;
     let keys = {};
     let bossSummonTimer = 0;
+    let paused = false;
 
     const player = {
       x: 100,
@@ -405,13 +482,12 @@
       speed: 3,
       attackCooldown: 0,
       flash: 0,
-      shield: 0, // 护盾持续时间（帧）
+      shield: 0,
       get atk() {
         if (godMode) return 9999;
-        if (this.level <= 3) return 10;
-        if (this.level <= 6) return 20;
-        if (this.level <= 15) return 50 + (this.level - 6) * 5; // 15级时为95
-        return 95 + (this.level - 15) * 5; // 16级起每级+5
+        // 攻击力随等级增长，最大为 180
+        let baseAtk = 5 + (this.level - 1) * 3.5;
+        return Math.min(baseAtk, 180);
       },
       get expNeeded() {
         return 3;
@@ -428,10 +504,13 @@
       gameLoop();
       showMessage("勇者传说 - 100关挑战", true);
       setTimeout(() => hideMessage(), 2500);
+
+      // 启动全局小兵生成器（每2秒）
+      spawnIntervalId = setInterval(spawnRandomMinions, 2000);
     }
 
     function isBossStage(stageIndex) {
-      return (stageIndex + 1) % 4 === 0; // 每4关一个BOSS
+      return (stageIndex + 1) % 4 === 0;
     }
 
     function getEnemyStats(stageIndex, isBoss = false) {
@@ -443,8 +522,9 @@
           damage: 30
         };
       } else {
+        // ✅ 小兵血量：每关 +10 HP（原为 +3）
         return {
-          hp: 40 + stageIndex * 3,
+          hp: 40 + stageIndex * 10,
           speed: Math.min(3.0, 0.8 + stageIndex * 0.02),
           damage: 10 + Math.floor(stageIndex / 10)
         };
@@ -461,11 +541,14 @@
       bossSummonTimer = 0;
       player.shield = 0;
 
+      // 清除旧定时器，防止重复
+      if (spawnIntervalId) clearInterval(spawnIntervalId);
+
       const isBoss = isBossStage(stageIndex);
       const stats = getEnemyStats(stageIndex, isBoss);
-      const enemyCount = isBoss ? 1 : Math.min(4 + Math.floor(stageIndex / 2), 30); // 最多30个
 
       if (isBoss) {
+        // BOSS 关卡：只生成 1 个 BOSS
         enemies.push({
           x: CANVAS_WIDTH - 100,
           y: CANVAS_HEIGHT / 2 - 40,
@@ -475,10 +558,13 @@
           speed: stats.speed,
           damage: stats.damage,
           isBoss: true,
-          hitFlash: 0
+          hitFlash: 0,
+          color: '#d32f2f'
         });
         showMessage(`BOSS 关卡 ${stageIndex + 1}！`, true);
       } else {
+        // ✅ 小兵数量随关卡增加：4 + floor(stage/2)，上限 30
+        const enemyCount = Math.min(4 + Math.floor(stageIndex / 2), 30);
         for (let i = 0; i < enemyCount; i++) {
           const x = CANVAS_WIDTH - 180 + Math.random() * 120;
           const y = 60 + Math.random() * (CANVAS_HEIGHT - 120);
@@ -492,17 +578,47 @@
             damage: stats.damage,
             isBoss: false,
             isSummoned: false,
-            hitFlash: 0
+            hitFlash: 0,
+            color: ENEMY_COLORS[Math.floor(Math.random() * ENEMY_COLORS.length)]
           });
         }
         showMessage(`第 ${stageIndex + 1} 关`, true);
       }
       setTimeout(hideMessage, 1500);
       updateUI();
+
+      // 重新启动小兵生成器（非 BOSS 关卡才需要持续生成）
+      if (!isBoss) {
+        spawnIntervalId = setInterval(spawnRandomMinions, 2000);
+      }
+    }
+
+    function spawnRandomMinions() {
+      if (gameOver || gameWon || paused || isBossStage(currentStage)) return;
+      // 每次额外生成 3 个小兵（动态补充）
+      for (let i = 0; i < 3; i++) {
+        const x = CANVAS_WIDTH - 180 + Math.random() * 120;
+        const y = 60 + Math.random() * (CANVAS_HEIGHT - 120);
+        const stats = getEnemyStats(currentStage, false);
+        enemies.push({
+          x: x,
+          y: y,
+          size: 20,
+          hp: stats.hp,
+          maxHp: stats.hp,
+          speed: stats.speed,
+          damage: stats.damage,
+          isBoss: false,
+          isSummoned: false,
+          hitFlash: 0,
+          color: ENEMY_COLORS[Math.floor(Math.random() * ENEMY_COLORS.length)]
+        });
+      }
     }
 
     function setupInput() {
       window.addEventListener('keydown', e => {
+        if (paused) return;
         keys[e.key.toLowerCase()] = true;
         const k = e.key.toLowerCase();
         if ((e.key === ' ' || e.key === 'Spacebar') && !e.repeat) {
@@ -513,7 +629,6 @@
             attack();
           }
         }
-        // 技能快捷键
         if (['q', 'e', 'r'].includes(k)) {
           useSkill(k);
         }
@@ -531,6 +646,7 @@
     }
 
     function attack() {
+      if (paused) return;
       const px = player.x + player.size / 2;
       const py = player.y + player.size / 2;
       createAttackParticles(px, py);
@@ -549,7 +665,7 @@
           damageTexts.push({
             x: e.x + e.size / 2,
             y: e.y,
-            text: damage.toString(),
+            text: Math.floor(damage).toString(),
             life: 60
           });
 
@@ -566,6 +682,7 @@
 
     function checkStageClear() {
       if (enemies.length === 0) {
+        if (spawnIntervalId) clearInterval(spawnIntervalId);
         if (currentStage + 1 >= TOTAL_STAGES) {
           gameWon = true;
           showMessage('🏆 传奇勇者！通关100关！', true);
@@ -604,7 +721,6 @@
       player.level++;
       player.exp = 0;
       
-      // HP 成长：1~15级 +50，16+级 +10
       if (player.level <= 15) {
         player.maxHp += 50;
       } else {
@@ -637,14 +753,14 @@
         damage: 1,
         isBoss: false,
         isSummoned: true,
-        hitFlash: 0
+        hitFlash: 0,
+        color: '#8e24aa'
       });
     }
 
     function update() {
-      if (gameOver || gameWon) return;
+      if (gameOver || gameWon || paused) return;
 
-      // 更新技能冷却
       for (const key in SKILLS) {
         if (SKILLS[key].current > 0) {
           SKILLS[key].current--;
@@ -652,7 +768,6 @@
       }
       updateSkillUI();
 
-      // 玩家移动
       let dx = 0, dy = 0;
       if (keys['w'] || keys['arrowup']) dy -= player.speed;
       if (keys['s'] || keys['arrowdown']) dy += player.speed;
@@ -669,7 +784,6 @@
       const px = player.x + player.size / 2;
       const py = player.y + player.size / 2;
 
-      // 更新敌人
       let boss = null;
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
@@ -692,7 +806,6 @@
         if (e.isBoss) boss = e;
       }
 
-      // BOSS 召唤小兵
       if (boss) {
         bossSummonTimer++;
         if (bossSummonTimer >= 120) {
@@ -703,7 +816,6 @@
         }
       }
 
-      // 粒子与伤害文本
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -770,7 +882,6 @@
         ctx.globalAlpha = 1;
       });
 
-      // 绘制玩家（带护盾效果）
       if (player.shield > 0) {
         ctx.strokeStyle = '#4fc3f7';
         ctx.lineWidth = 3;
@@ -786,9 +897,7 @@
       drawHealthBar(player.x, player.y - 10, player.hp, player.maxHp, '#4caf50', true);
 
       enemies.forEach(e => {
-        const color = e.isSummoned 
-          ? '#8e24aa' 
-          : (e.isBoss ? '#d32f2f' : '#f44336');
+        const color = e.color || '#f44336';
         ctx.fillStyle = e.hitFlash > 0 ? '#ffcccc' : color;
         ctx.fillRect(e.x, e.y, e.size, e.size);
         ctx.strokeStyle = e.isBoss ? '#b71c1c' : '#5d4037';
@@ -819,7 +928,7 @@
     function updateUI() {
       document.getElementById('hp').textContent = Math.ceil(player.hp);
       document.getElementById('maxHp').textContent = player.maxHp;
-      document.getElementById('atk').textContent = player.atk;
+      document.getElementById('atk').textContent = Math.floor(player.atk);
       document.getElementById('level').textContent = player.level;
       document.getElementById('exp').textContent = player.exp;
       document.getElementById('expNeeded').textContent = player.expNeeded;
@@ -856,10 +965,39 @@
       showMessage('', false);
     }
 
+    // ===== 暂停控制 =====
+    function togglePause() {
+      paused = !paused;
+      if (paused) {
+        showMessage("游戏已暂停", true);
+        document.getElementById('pauseButton').textContent = '▶ 继续';
+      } else {
+        hideMessage();
+        document.getElementById('pauseButton').textContent = '|| 暂停';
+      }
+    }
+
+    // ===== 游戏说明折叠控制 =====
+    let instructionsExpanded = true;
+    function toggleInstructions() {
+      const content = document.getElementById('instructionsContent');
+      const icon = document.getElementById('toggleIcon');
+      instructionsExpanded = !instructionsExpanded;
+      if (instructionsExpanded) {
+        content.classList.remove('collapsed');
+        icon.textContent = '▼';
+      } else {
+        content.classList.add('collapsed');
+        icon.textContent = '▶';
+      }
+    }
+
     function gameLoop() {
-      update();
-      render();
-      renderDamageTexts();
+      if (!paused) {
+        update();
+        render();
+        renderDamageTexts();
+      }
       requestAnimationFrame(gameLoop);
     }
 
